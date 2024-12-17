@@ -1,4 +1,6 @@
+#include <stdbool.h>
 #include <stdio.h>
+#include <time.h>
 
 #include "debug.h"
 #include "config.h"
@@ -16,14 +18,17 @@ int main (int argc, char *argv[])
 {
     int	ret = 0;
 
-    if (argc != 3) {
-	printf ("Usage: %s config_file sock_port\n", argv[0]);
-	return 0;
-    }    
+    printf ("Usage: %s config_file localhost [sock_port]\n", argv[0]);   
 
     ret = parse_config_file (argv[1]);
     check (ret == 0, "Failed to parse config file");
     config_info.sock_port = argv[2];
+    if (config_info.sock_port == NULL) {
+        config_info.sock_port = "8899";
+        config_info.is_server = true;
+    } else {
+        config_info.is_server = false;
+    }
 
     ret = init_env ();
     check (ret == 0, "Failed to init env");
@@ -49,9 +54,9 @@ int init_env ()
     char fname[64] = {'\0'};
 
     if (config_info.is_server) {
-	sprintf (fname, "server[%d].log", config_info.rank);
+	    sprintf (fname, "server[%d].log", config_info.rank);
     } else {
-	sprintf (fname, "client[%d].log", config_info.rank);
+	    sprintf (fname, "client[%d].log", config_info.rank);
     }
     log_fp = fopen (fname, "w");
     check (log_fp != NULL, "Failed to open log file");

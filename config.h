@@ -9,6 +9,8 @@ enum ConfigFileAttr {
     ATTR_CLIENTS,
     ATTR_MSG_SIZE,
     ATTR_NUM_CONCURR_MSGS,
+    ATTR_QP_NUM,
+    ATTR_THREAD_NUM,
 };
 
 struct ConfigInfo {
@@ -22,6 +24,9 @@ struct ConfigInfo {
 
     int  msg_size;           /* the size of each echo message */
     int  num_concurr_msgs;   /* the number of messages can be sent concurrently */
+
+    int  qp_num;
+    int  thread_num;
 
     char *sock_port;         /* socket port number */
 }__attribute__((aligned(64)));

@@ -4,7 +4,7 @@
 #include "ib.h"
 #include "debug.h"
 
-int modify_qp_to_rts (struct ibv_qp *qp, uint32_t target_qp_num, uint16_t target_lid)
+int modify_qp_to_rts (struct ibv_qp *qp, uint32_t target_qp_num, uint16_t target_lid, uint8_t *dgid)
 {
     int ret = 0;
 
@@ -35,12 +35,17 @@ int modify_qp_to_rts (struct ibv_qp *qp, uint32_t target_qp_num, uint16_t target
 	    .rq_psn             = 0,
 	    .max_dest_rd_atomic = 1,
 	    .min_rnr_timer      = 12,
-	    .ah_attr.is_global  = 0,
+	    .ah_attr.is_global  = 1,
 	    .ah_attr.dlid       = target_lid,
 	    .ah_attr.sl         = IB_SL,
 	    .ah_attr.src_path_bits = 0,
 	    .ah_attr.port_num      = IB_PORT,
+		.ah_attr.grh.flow_label= 0,
+		.ah_attr.grh.hop_limit = 1,
+		.ah_attr.grh.sgid_index= 0,
+		.ah_attr.grh.traffic_class = 0,
 	};
+	memcpy(&qp_attr.ah_attr.grh.dgid, dgid, 16);
 
 	ret = ibv_modify_qp(qp, &qp_attr,
 			    IBV_QP_STATE | IBV_QP_AV |
@@ -80,18 +85,18 @@ int post_send (uint32_t req_size, uint32_t lkey, uint64_t wr_id,
     struct ibv_send_wr *bad_send_wr;
 
     struct ibv_sge list = {
-	.addr   = (uintptr_t) buf,
-	.length = req_size,
-	.lkey   = lkey
+		.addr   = (uintptr_t) buf,
+		.length = req_size,
+		.lkey   = lkey
     };
 
     struct ibv_send_wr send_wr = {
-	.wr_id      = wr_id,
-	.sg_list    = &list,
-	.num_sge    = 1,
-	.opcode     = IBV_WR_SEND_WITH_IMM,
-	.send_flags = IBV_SEND_SIGNALED,
-	.imm_data   = htonl (imm_data)
+		.wr_id      = wr_id,
+		.sg_list    = &list,
+		.num_sge    = 1,
+		.opcode     = IBV_WR_SEND_WITH_IMM,
+		.send_flags = IBV_SEND_SIGNALED,
+		.imm_data   = htonl (imm_data)
     };
 
     ret = ibv_post_send (qp, &send_wr, &bad_send_wr);
