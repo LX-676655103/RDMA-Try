@@ -3,6 +3,8 @@
 
 #include <infiniband/verbs.h>
 
+#define MAX_QP_WR 4096
+
 struct IBRes {
     struct ibv_context		*ctx;
     struct ibv_pd		*pd;
@@ -18,7 +20,7 @@ struct IBRes {
     size_t  ib_buf_size;
 };
 
-extern struct IBRes ib_res;
+extern struct IBRes *ib_res_array;
 
 int  setup_ib ();
 void close_ib_connection ();

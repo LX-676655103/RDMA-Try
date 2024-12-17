@@ -1,8 +1,13 @@
+#include <netdb.h>
+#include <stdbool.h>
+#include <stdio.h>
 #include <stdlib.h>
 #include <unistd.h>
 #include <string.h>
-#include <errno.h>
 #include <sys/utsname.h>
+#include <ifaddrs.h>
+#include <netinet/in.h>
+#include <arpa/inet.h>
 
 #include "debug.h"
 #include "config.h"
@@ -25,67 +30,33 @@ void clean_up_line (char *line)
     *i = 0;
 }
 
-/*
- *  parse_node_list:
- *       get a list of servers or clients
- *
- *  return value:
- *       the number of nodes in the list
- */
+int is_ip_local(const char *ip_to_check) {
+    int ret = 0;
+    struct ifaddrs *ifaddr;
+    char host[NI_MAXHOST];
 
-int parse_node_list (char *line, char ***node_list)
-{
-    int start = 0, end = 0, num_nodes=0;
-    char *i = line;
-    char node_name_prefix[128] = {'\0'};
-    char *j = node_name_prefix;
+    ret = getifaddrs(&ifaddr);
+    check (ret == 0, "Failed to get network interface on the host machine.");
 
-    while (*i != '.') {
-        if ((*i >= '0') && (*i <= '9')) {
-            start = start * 10 + *i - '0';
-        } else {
-            *j = *i;
-            j += 1;
+    for (struct ifaddrs *ifa = ifaddr; ifa != NULL; ifa = ifa->ifa_next) {
+        if (ifa->ifa_addr == NULL)
+            continue;
+
+        int family = ifa->ifa_addr->sa_family;
+        if (family == AF_INET) {
+            ret = getnameinfo(ifa->ifa_addr, sizeof(struct sockaddr_in), 
+                host, NI_MAXHOST, NULL, 0, NI_NUMERICHOST);
+            check (ret == 0, "Failed to get name info of network interface.");
+            if (strcmp(ip_to_check, host) == 0) {
+                freeifaddrs(ifaddr);
+                return 1;
+            }
         }
-        i += 1;
     }
-
-    i += 2;
-    while (*i != 0) {
-        if ((*i >= '0') && (*i <= '9')) {
-            end = end * 10 + *i - '0';
-        }
-        i += 1;
-    }
-
-    num_nodes = end - start + 1;
-    check (num_nodes > 0, "Invaild number of nodes: %d", num_nodes);
-
-    *node_list = (char **) calloc (num_nodes, sizeof(char *));
-    if (*node_list == NULL){
-        printf ("Failed to allocate node_list.\n");
-        return 0;
-    }
-
-    int k = 0, node_ind = start;
-    
-    for (k = 0; k < num_nodes; k++) {
-        (*node_list)[k] = (char *) calloc (128, sizeof(char));
-        check ((*node_list)[k] != NULL,
-               "Failed to allocate node_list[%d]", k);
-
-        if (strstr(node_name_prefix, "mnemosyne")) {
-            sprintf ((*node_list)[k], "mnemosyne%02d", node_ind);
-        } else {
-            sprintf ((*node_list)[k], "saguaro%d", node_ind);
-        }
-
-        node_ind += 1;
-    }
-
-    return num_nodes;
-
- error:
+    freeifaddrs(ifaddr);
+    return 0;
+error:
+    freeifaddrs(ifaddr);
     return -1;
 }
 
@@ -106,7 +77,7 @@ int get_rank ()
 
     config_info.rank = -1;
     for (i = 0; i < num_servers; i++) {
-        if (strstr(hostname, config_info.servers[i])) {
+        if (is_ip_local(config_info.servers[i])) {
             config_info.rank      = i;
             config_info.is_server = true;
             break;
@@ -114,20 +85,51 @@ int get_rank ()
     }
 
     for (i = 0; i < num_clients; i++) {
-        if (strstr(hostname, config_info.clients[i])) {
+        if (is_ip_local(config_info.clients[i])) {
             if (config_info.rank == -1) {
                 config_info.rank      = i;
                 config_info.is_server = false;
                 break;
             } else {
-                check (0, "node (%s) listed as both server and client", hostname);
+                printf("node (%s) listed as both server and client\n", hostname);
             }
         }
     }
-
     check (config_info.rank >= 0, "Failed to get rank for node: %s", hostname);
-
     return 0;
+ error:
+    return -1;
+}
+
+int parse_node_list (char *line, char ***node_list)
+{
+    int num_nodes = 1, k = 0, begin = 0, end = 0;
+    char *i = line;
+
+    while (*i != 0) {
+        if (*i == '|') ++num_nodes;
+        i += 1;
+    }
+    check (num_nodes >= 1, "Invaild number of nodes: %d", num_nodes);
+
+    *node_list = (char **) calloc (num_nodes, sizeof(char *));
+    if (*node_list == NULL){
+        printf ("Failed to allocate node_list.\n");
+        return 0;
+    }
+    
+    for (k = 0; k < num_nodes; k++) {
+        (*node_list)[k] = (char *) calloc (128, sizeof(char));
+        check ((*node_list)[k] != NULL, "Failed to allocate node_list[%d]", k);
+
+        while ((*(line + end) != 0) && (*(line + end) != '|')) ++end;
+        strncpy((*node_list)[k], line + begin, end - begin);
+        begin = end + 1;
+        end = begin;
+    }
+
+    return num_nodes;
+
  error:
     return -1;
 }
@@ -150,7 +152,7 @@ int parse_config_file (char *fname)
 
         clean_up_line (line);
 
-	if (strstr (line, "servers:")) {
+	    if (strstr (line, "servers:")) {
             attr = ATTR_SERVERS;
             continue;
         } else if (strstr (line, "clients:")) {
@@ -162,9 +164,15 @@ int parse_config_file (char *fname)
         } else if (strstr (line, "num_concurr_msgs:")) {
             attr = ATTR_NUM_CONCURR_MSGS;
             continue;
+        } else if (strstr (line, "qp_num:")) {
+            attr = ATTR_QP_NUM;
+            continue;
+        } else if (strstr (line, "thread_num:")) {
+            attr = ATTR_THREAD_NUM;
+            continue;
         }
 
-	if (attr == ATTR_SERVERS) {
+	    if (attr == ATTR_SERVERS) {
             ret = parse_node_list (line, &config_info.servers);
             check (ret > 0, "Failed to get server list");
             config_info.num_servers = ret;
@@ -175,17 +183,26 @@ int parse_config_file (char *fname)
         } else if (attr == ATTR_MSG_SIZE) {
             config_info.msg_size = atoi(line);
             check (config_info.msg_size > 0,
-                   "Invalid Value: msg_size = %d",
-                   config_info.msg_size);
+                   "Invalid Value: msg_size = %d", config_info.msg_size);
         } else if (attr == ATTR_NUM_CONCURR_MSGS) {
             config_info.num_concurr_msgs = atoi(line);
             check (config_info.num_concurr_msgs > 0,
                    "Invalid Value: num_concurr_msgs = %d",
                    config_info.num_concurr_msgs);
+        } else if (attr == ATTR_QP_NUM) {
+            config_info.qp_num = atoi(line);
+            check (config_info.qp_num > 0,
+                   "Invalid Value: qp_num = %d", config_info.qp_num);
+        } else if (attr == ATTR_THREAD_NUM) {
+            config_info.thread_num = atoi(line);
+            check (config_info.thread_num > 0,
+                   "Invalid Value: thread_num = %d", config_info.thread_num);
         }
-
         attr = 0;
     }
+    check (config_info.qp_num % config_info.thread_num == 0,
+        "qp_num should be a multiple of thread_num : qp_num = %d, thread_num = %d", 
+        config_info.qp_num, config_info.thread_num);
 
     ret = get_rank ();
     check (ret == 0, "Failed to get rank");
@@ -238,6 +255,8 @@ void print_config_info ()
     log ("rank                      = %d", config_info.rank);
     log ("msg_size                  = %d", config_info.msg_size);
     log ("num_concurr_msgs          = %d", config_info.num_concurr_msgs);
+    log ("qp_num                    = %d", config_info.qp_num);
+    log ("thread_num                = %d", config_info.thread_num);
     log ("sock_port                 = %s", config_info.sock_port);
     
     log (LOG_SUB_HEADER, "End of Configuraion");

@@ -56,8 +56,7 @@ int sock_create_bind (char *port)
 {
     struct addrinfo hints;
     struct addrinfo *result, *rp;
-    int sock_fd = -1, ret = 0;
-
+    int sock_fd = -1, ret = 0, opt = 1;
     memset(&hints, 0, sizeof(struct addrinfo));
     hints.ai_socktype = SOCK_STREAM;
     hints.ai_family = AF_UNSPEC;
@@ -71,7 +70,9 @@ int sock_create_bind (char *port)
         if (sock_fd < 0) {
             continue;
         }
-
+        ret = setsockopt(sock_fd, SOL_SOCKET, 
+            SO_REUSEADDR | SO_REUSEPORT, &opt, sizeof(opt));
+        check(ret == 0, "Failed to set sockopt.");
         ret = bind(sock_fd, rp->ai_addr, rp->ai_addrlen);
         if (ret == 0) {
             /* bind success */
@@ -149,6 +150,9 @@ int sock_set_qp_info(int sock_fd, struct QPInfo *qp_info)
     tmp_qp_info.lid       = htons(qp_info->lid);
     tmp_qp_info.qp_num    = htonl(qp_info->qp_num);
     tmp_qp_info.rank      = htonl(qp_info->rank);
+    tmp_qp_info.addr      = htonll(qp_info->addr);
+    tmp_qp_info.rkey      = htonl(qp_info->rkey);
+    memcpy(tmp_qp_info.gid, qp_info->gid, 16);
 
     n = sock_write(sock_fd, (char *)&tmp_qp_info, sizeof(struct QPInfo));
     check(n==sizeof(struct QPInfo), "write qp_info to socket.");
@@ -165,12 +169,21 @@ int sock_get_qp_info(int sock_fd, struct QPInfo *qp_info)
     struct QPInfo  tmp_qp_info;
 
     n = sock_read(sock_fd, (char *)&tmp_qp_info, sizeof(struct QPInfo));
-    check(n==sizeof(struct QPInfo), "read qp_info from socket.");
+    check(n == sizeof(struct QPInfo), "read qp_info from socket.");
 
     qp_info->lid       = ntohs(tmp_qp_info.lid);
     qp_info->qp_num    = ntohl(tmp_qp_info.qp_num);
     qp_info->rank      = ntohl(tmp_qp_info.rank);
-    
+    qp_info->addr      = ntohll(tmp_qp_info.addr);
+    qp_info->rkey      = ntohl(tmp_qp_info.rkey);
+    memcpy(qp_info->gid, tmp_qp_info.gid, 16);
+
+    /* log("Remote address = 0x%" PRIx64 "\n", qp_info->addr);
+	log("Remote rkey = 0x%x\n", qp_info->rkey);
+	log("Remote QP number = 0x%x\n", qp_info->qp_num);
+	log("Remote LID = 0x%x\n", qp_info->lid);
+    */
+
     return 0;
 
  error:
